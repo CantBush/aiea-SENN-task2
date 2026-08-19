@@ -70,53 +70,103 @@ def run(path:str,dataset_dir:str):
         return transformed_im
 
 
-    for batch_idx, (images, _) in enumerate(test_loader):
-        if batch_idx >= 4:
+    for batch_idx, (images, labels) in enumerate(test_loader):
+        if batch_idx >= 50:
             break
-        
+
         print("Batch:{}/{}".format(batch_idx, len(test_loader)), end='\r')
+
         try:
             memory, _ = next(memory_iter)
         except StopIteration:
             memory_iter = iter(mem_loader)
             memory, _ = next(memory_iter)
-                
+
         images = images.to(device)
         memory = memory.to(device)
+        labels = labels.to(device)
 
         # compute output
-        outputs,rw = model(images,memory,return_weights=True)
+        outputs, rw = model(images, memory, return_weights=True)
         _, predictions = torch.max(outputs, 1)
 
         # compute memory outputs
-        mem_val,memory_sorted_index = torch.sort(rw,descending=True)
-        fig = plt.figure(figsize=(batch_size_test*2, 4),dpi=300)
-        columns = batch_size_test
-        rows = 2
+        mem_val, memory_sorted_index = torch.sort(rw, descending=True)
+
         for ind in range(len(images)):
+
+            # Only generate explanations for WRONG predictions
+            if predictions[ind] == labels[ind]:
+                continue
+
+            # Absolute index of this image in the test dataset
+            image_index = batch_idx * batch_size_test + ind
+
             input_selected = images[ind].unsqueeze(0)
 
-            # M_c u M_e : set of sample with a positive impact on prediction
-            m_ec = memory_sorted_index[ind][mem_val[ind]>0]
+            # M_c u M_e : samples with a positive impact on prediction
+            m_ec = memory_sorted_index[ind][mem_val[ind] > 0]
 
             # get reduced memory
             reduced_mem = undo_normalization(memory[m_ec])
-            npimg = torchvision.utils.make_grid(reduced_mem,nrow=4).cpu().numpy()
+            npimg = torchvision.utils.make_grid(
+                reduced_mem,
+                nrow=4
+            ).cpu().numpy()
 
-            # build and store image
+            # Create figure
+            fig = plt.figure(
+                figsize=(batch_size_test * 2, 4),
+                dpi=300
+            )
 
-            fig.add_subplot(rows, columns, ind+1)
-            plt.imshow((get_image(input_selected)* 255).astype(np.uint8),interpolation='nearest', aspect='equal')
-            plt.title('Prediction:{}'.format(name_classes[predictions[ind]]))
+            # Input image
+            plt.subplot(1, 2, 1)
+
+            plt.imshow(
+                (get_image(input_selected) * 255).astype(np.uint8),
+                interpolation='nearest',
+                aspect='equal'
+            )
+
+            plt.title(
+                'Index: {}\nPrediction: {}\nTrue: {}'.format(
+                    image_index,
+                    name_classes[predictions[ind]],
+                    name_classes[labels[ind]]
+                )
+            )
+
             plt.axis('off')
-            ax2 = fig.add_subplot(rows, columns, batch_size_test+1+ind)
-            plt.imshow((np.transpose(npimg, (1,2,0))* 255).astype(np.uint8),interpolation='nearest', aspect='equal')
+
+            # Memory samples
+            plt.subplot(1, 2, 2)
+
+            plt.imshow(
+                (np.transpose(npimg, (1, 2, 0)) * 255).astype(np.uint8),
+                interpolation='nearest',
+                aspect='equal'
+            )
+
             plt.title('Used Samples')
             plt.axis('off')
-        fig.tight_layout()
-        fig.savefig(dir_save+str(batch_idx*batch_size_test+ind)+".png")
-        plt.close()
-        print('Generated {}/{} images'.format(batch_idx,len(test_loader)),end='\r')
+
+            fig.tight_layout()
+
+            # Save using the absolute test-set index
+            fig.savefig(
+                dir_save + str(image_index) + ".png"
+            )
+
+            plt.close()
+
+        print(
+            'Processed {}/{} batches'.format(
+                batch_idx,
+                len(test_loader)
+            ),
+            end='\r'
+        )
 
 
 def main(argv):
